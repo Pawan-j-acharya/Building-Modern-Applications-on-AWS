@@ -1,0 +1,83 @@
+service: task-11-websocket-api
+
+provider:
+  name: aws
+  runtime: python3.12
+  profile: second-account
+  region: us-east-1
+  stage: dev
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action: 
+            - "logs:CreateLogGroup"
+            - "logs:CreateLogStream"
+            - "logs:PutLogEvents"
+          Resource: "arn:aws:logs:${aws:region}:${aws:accountId}:log-group:/aws/lambda/*:*"
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:DeleteItem
+            - dynamodb:Scan
+          Resource:
+            - Fn::GetAtt: [WebSocketConnectionsTable, Arn]
+        - Effect: Allow
+          Action:
+            - execute-api:ManageConnections
+            - execute-api:Invoke
+          Resource:
+            - Fn::Sub: "arn:aws:execute-api:${aws:region}:${aws:accountId}:${WebSocketApi}/${self:provider.stage}/@connections/*"
+  environment:
+    WEBSOCKET_ENDPOINT: 
+      Fn::Sub: "https://${WebSocketApi}.execute-api.${aws:region}.amazonaws.com/${self:provider.stage}"
+
+functions:
+  connect:
+    handler: handler.websocket.connect
+    events:
+      - websocket: $connect
+
+  disconnect:
+    handler: handler.websocket.disconnect
+    events:
+      - websocket: $disconnect
+
+  message:
+    handler: handler.websocket.message
+    events:
+      - websocket: $default
+  
+resources:
+  Resources:
+    WebSocketApi:
+      Type: AWS::ApiGatewayV2::Api
+      Properties:
+        Name: SimpleChatWebSocketApi
+        ProtocolType: WEBSOCKET
+        RouteSelectionExpression: "$request.body.action"
+    
+    WebSocketConnectionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: WebSocketConnections
+        AttributeDefinitions:
+          - AttributeName: connectionId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: connectionId
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+      
+  Outputs:
+    WebSocketApiUrl:
+      Value:
+        Fn::Sub: "wss://${WebSocketApi}.execute-api.${aws:region}.amazonaws.com/${self:provider.stage}"
+      Export:
+        Name: ${self:service}-${self:provider.stage}-WebSocketApiUrl
+
+plugins:
+  - serverless-offline

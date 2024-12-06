@@ -1,0 +1,202 @@
+service: sls-rds-connector
+
+provider:
+  name: aws
+  runtime: python3.12
+  region: us-east-1
+  profile: second-account
+  stage: dev
+  vpc:
+    securityGroupIds:
+      - Ref: LambdaSecurityGroup
+    subnetIds:
+      - Ref: PublicSubnet1
+      - Ref: PublicSubnet2
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action: 
+            - ssm:GetParameter
+            - ssm:GetParameters
+            - ssm:GetParametersByPath
+          Resource: 
+            Fn::Sub: 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${self:service}/*'
+
+custom:
+  dbName: ${ssm:/sls-rds-connector/mydb_name}
+  dbUser: ${ssm:/sls-rds-connector/mydb_user}
+  dbPass: ${ssm:/sls-rds-connector/mydb_pass}
+  scripts:
+    hooks:
+      'before:package:createDeploymentArtifacts': 
+        - echo "Database Name: ${self:custom.dbName}"  
+        - echo "Database User: ${self:custom.dbUser}"
+        - echo "Database Password: ${self:custom.dbPass}"
+
+functions:
+  DB-Connection:
+    handler: handlers.handler.lambda_handler
+    environment:
+      DB_HOST: 
+        Fn::GetAtt: [RDSInstance, Endpoint.Address]
+      DB_NAME: ${self:custom.dbName}
+      DB_USER: ${self:custom.dbUser}
+      DB_PASS: ${self:custom.dbPass}
+    events:
+      - http:
+          path: connectToDB
+          method: get
+
+
+resources:
+  Resources:
+    VPC:
+      Type: AWS::EC2::VPC
+      Properties:
+        CidrBlock: 10.0.0.0/16
+        EnableDnsSupport: true
+        EnableDnsHostnames: true
+        Tags:
+          - Key: Name
+            Value: ${self:service}-vpc
+
+    InternetGateway:
+      Type: AWS::EC2::InternetGateway
+      Properties:
+        Tags:
+          - Key: Name
+            Value: ${self:service}-igw
+
+    AttachGateway:
+      Type: AWS::EC2::VPCGatewayAttachment
+      Properties:
+        VpcId: 
+          Ref: VPC
+        InternetGatewayId: 
+          Ref: InternetGateway
+
+    # First subnet 
+    PublicSubnet1:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: 
+          Ref: VPC
+        CidrBlock: 10.0.3.0/24
+        AvailabilityZone: us-east-1a
+        MapPublicIpOnLaunch: true
+        Tags:
+          - Key: Name
+            Value: ${self:service}-subnet-1
+
+    # Second subnet
+    PublicSubnet2:
+      Type: AWS::EC2::Subnet
+      Properties:
+        VpcId: 
+          Ref: VPC
+        CidrBlock: 10.0.4.0/24
+        AvailabilityZone: us-east-1b
+        MapPublicIpOnLaunch: true
+        Tags:
+          - Key: Name
+            Value: ${self:service}-subnet-2
+
+    PublicRouteTable:
+      Type: AWS::EC2::RouteTable
+      Properties:
+        VpcId: 
+          Ref: VPC
+        Tags:
+          - Key: Name
+            Value: ${self:service}-rt
+
+    PublicRoute:
+      Type: AWS::EC2::Route
+      DependsOn: AttachGateway
+      Properties:
+        RouteTableId: 
+          Ref: PublicRouteTable
+        DestinationCidrBlock: 0.0.0.0/0
+        GatewayId: 
+          Ref: InternetGateway
+
+    PublicSubnet1RouteTableAssociation:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: 
+          Ref: PublicSubnet1
+        RouteTableId: 
+          Ref: PublicRouteTable
+
+    PublicSubnet2RouteTableAssociation:
+      Type: AWS::EC2::SubnetRouteTableAssociation
+      Properties:
+        SubnetId: 
+          Ref: PublicSubnet2
+        RouteTableId: 
+          Ref: PublicRouteTable
+
+    LambdaSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Lambda SG
+        VpcId: 
+          Ref: VPC
+        SecurityGroupEgress:
+          - IpProtocol: -1
+            FromPort: -1
+            ToPort: -1
+            CidrIp: 0.0.0.0/0
+        Tags:
+          - Key: Name
+            Value: ${self:service}-lambda-sg
+    
+    RDSSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: RDS SG
+        VpcId: 
+          Ref: VPC
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 3306
+            ToPort: 3306
+            SourceSecurityGroupId: 
+              Ref: LambdaSecurityGroup
+        Tags:
+          - Key: Name
+            Value: ${self:service}-rds-sg
+
+    DBSubnetGroup:
+      Type: AWS::RDS::DBSubnetGroup
+      Properties:
+        DBSubnetGroupDescription: DB Subnet Group
+        SubnetIds:
+          - Ref: PublicSubnet1
+          - Ref: PublicSubnet2
+        Tags:
+          - Key: Name
+            Value: ${self:service}-subnet-group
+
+    RDSInstance:
+      Type: AWS::RDS::DBInstance
+      Properties:
+        DBInstanceIdentifier: ${self:service}-db
+        Engine: mysql
+        DBInstanceClass: db.t3.micro
+        AllocatedStorage: 20
+        DBName: ${self:custom.dbName}
+        MasterUsername: ${self:custom.dbUser}
+        MasterUserPassword: ${self:custom.dbPass}
+        VPCSecurityGroups:
+          - Ref: RDSSecurityGroup
+        DBSubnetGroupName: 
+          Ref: DBSubnetGroup
+        PubliclyAccessible: true
+        Tags:
+          - Key: Name
+            Value: ${self:service}-rds
+
+plugins:
+  - serverless-python-requirements

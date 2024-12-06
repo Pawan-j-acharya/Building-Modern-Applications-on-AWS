@@ -1,0 +1,45 @@
+service: data-export-service
+
+provider:
+  name: aws
+  runtime: python3.12
+  region: us-east-1
+  profile: second-account
+  stage: dev
+  environment:
+    EXPORT_BUCKET: exported-db-data
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - dynamodb:Scan
+          Resource: 
+            - arn:aws:s3:::${self:provider.environment.EXPORT_BUCKET}/*
+            - arn:aws:dynamodb:${self:provider.region}:${aws:accountId}:table/*
+            
+
+plugins:
+  - serverless-python-requirements
+  - serverless-offline
+
+
+functions:
+  exportData:
+    handler: handlers/export_handler.handler
+    events:
+      - http:
+          path: export
+          method: post
+          cors: true
+
+resources:
+  Resources:
+    ExportedDataBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.EXPORT_BUCKET}
+    

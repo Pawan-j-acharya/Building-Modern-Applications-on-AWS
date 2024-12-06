@@ -1,0 +1,128 @@
+service: task-user-auth-using-cognito
+
+provider:
+  name: aws
+  runtime: python3.12
+  region: us-east-1
+  stage: dev
+  profile: second-account
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - cognito-idp:*
+          Resource: '*'
+  environment:
+    COGNITO_USER_POOL_ID: ${self:custom.userPoolId}
+    COGNITO_CLIENT_ID: ${self:custom.userPoolClientId}
+  
+custom:
+  userPoolId: 
+    Ref: CognitoUserPool
+  userPoolClientId:
+    Ref: CognitoUserPoolClient
+
+package:
+  patterns:
+    - '!./node_modules/**'
+    - ./handlers/**
+    - ./data/**
+    - ./entities/**
+    - ./utils/**
+    - ./lib/**    
+
+functions:
+  UserSignUp:
+    handler: handlers.signup-user.handler
+    events:
+      - http:
+          path: /signup
+          method: post
+          cors: true
+
+  confirmSignup:
+    handler: handlers.confirm-user-signup.confirm_signup
+    events:
+      - http:
+          path: /confirmSignup
+          method: post
+          cors: true
+  
+  resendVerificationCode:
+    handler: handlers.confirm-user-signup.resend_verification
+    events:
+      - http:
+          path: /resendVerificationCode
+          method: post
+          cors: true
+
+  UserSignIn:
+    handler: handlers.signin-user.sign_in
+    events:
+      - http:
+          path: /signin
+          method: post
+          cors: true
+  
+  GetUser:
+    handler: handlers.get-user.get_user
+    events:
+      - http:
+          path: /getUser
+          method: get
+          cors: true
+          authorizer:
+            name: CognitoAuthorizer
+            type: COGNITO_USER_POOLS
+            arn: !GetAtt CognitoUserPool.Arn
+            identitySource: method.request.header.Authorization
+
+resources:
+  Resources:
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: ${self:service}-${self:provider.stage}-user-pool
+        AutoVerifiedAttributes:
+          - email
+        UsernameAttributes:
+          - email
+        Schema:
+          - Name: email
+            AttributeDataType: String
+            Mutable: true
+            Required: true
+          - Name: name
+            AttributeDataType: String
+            Mutable: true
+            Required: true
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 8
+            RequireLowercase: true
+            RequireNumbers: true
+            RequireSymbols: true
+            RequireUppercase: true
+    
+    CognitoUserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: ${self:service}-${self:provider.stage}-client
+        GenerateSecret: false
+        UserPoolId: !Ref CognitoUserPool
+        ExplicitAuthFlows:
+          - ALLOW_USER_SRP_AUTH
+          - ALLOW_USER_PASSWORD_AUTH  
+          - ALLOW_REFRESH_TOKEN_AUTH
+        SupportedIdentityProviders:
+          - COGNITO
+        AccessTokenValidity: 1
+        IdTokenValidity: 1
+        RefreshTokenValidity: 30
+    
+            
+plugins:
+  - serverless-offline
+  - serverless-python-requirements
+  - serverless-dotenv-plugin

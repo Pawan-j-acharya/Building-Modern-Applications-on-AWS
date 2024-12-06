@@ -1,0 +1,67 @@
+service: html-to-pdf-converter
+
+provider:
+  name: aws
+  runtime: python3.12
+  region: us-east-1
+  profile: second-account
+  stage: dev
+  environment:
+    PDF_BUCKET_NAME: ${self:service}-${sls:stage}-pdfs
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:ListBucket
+          Resource: 
+            - arn:aws:s3:::${self:provider.environment.PDF_BUCKET_NAME}
+            - arn:aws:s3:::${self:provider.environment.PDF_BUCKET_NAME}/*
+
+custom:
+  pythonRequirements:
+    layer:
+      name: lambda-layer
+      description: Dependencies for lambda
+      compatibleRuntimes:
+        - python3.12
+      dockerizePip: true
+      
+      
+
+package:
+  patterns:
+    - '!node_modules/**'
+    - '!venv/**'
+    - '!lambda-layer/**'
+    - 'handlers/**'
+    - 'lib/**'
+
+plugins:
+  - serverless-offline
+  - serverless-python-requirements
+  - serverless-dotenv-plugin
+
+
+
+functions:
+  convertToPdf:
+    handler: handlers.convert_to_pdf.handler
+    layers:
+      - Ref: PythonRequirementsLambdaLayer
+    events:
+      - http:
+          path: convertToPdf
+          method: post
+          cors: true
+   
+
+resources:
+  Resources:
+    PdfBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.PDF_BUCKET_NAME}
+        

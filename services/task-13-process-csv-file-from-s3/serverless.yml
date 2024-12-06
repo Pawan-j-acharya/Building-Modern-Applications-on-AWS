@@ -1,0 +1,56 @@
+service: task-13-process-csv-file-from-s3
+
+provider:
+  name: aws
+  runtime: python3.12
+  region: us-east-1
+  profile: second-account
+  stage: dev
+  environment:
+    S3_BUCKET_NAME: task-13-bucket
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - "s3:putObject"
+        - "s3:getObject"
+        - "s3:ListBucket"
+        - "dynamodb:PutItem"
+        - "dynamodb:Scan"
+      Resource: 
+        - "arn:aws:s3:::${self:provider.environment.S3_BUCKET_NAME}/*"
+        - !GetAtt Task13Table.Arn
+
+plugins:
+  - serverless-python-requirements
+  - serverless-offline
+
+functions:
+  Process:
+    handler: handlers.process.fetch_and_store_data
+    events:
+      - httpApi:
+          path: /fetch
+          method: get
+          
+
+resources:
+  Resources:
+    Task13Bucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.S3_BUCKET_NAME}
+        AccessControl: BucketOwnerFullControl
+
+    Task13Table:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: Task13Table
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1

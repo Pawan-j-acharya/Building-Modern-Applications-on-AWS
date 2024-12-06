@@ -1,0 +1,63 @@
+service: uploading-documents-to-s3-programmatically
+
+provider:
+  name: aws
+  runtime: python3.12
+  region: us-east-1
+  profile: second-account
+  apiGateway:
+    binary:
+      mediaTypes:
+        - multipart/form-data
+        - application/octet-stream
+  iam:
+    role:
+      name: uploading-documents-to-s3-programmatically
+      policies:
+        - name: uploading-documents-to-s3-programmatically-policy
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:ListBucket
+          Resource:
+            - arn:aws:s3:::${env:UPLOAD_BUCKET_NAME}
+            - arn:aws:s3:::${env:UPLOAD_BUCKET_NAME}/*
+  environment:
+    UPLOAD_BUCKET_NAME: ${env:UPLOAD_BUCKET_NAME}
+
+package:
+  patterns:
+    - '!./node_modules/**'
+    - ./handlers/**
+    - ./data/**
+    - ./entities/**
+    - ./utils/**
+    - ./lib/**    
+
+functions:
+  uploadFile:
+    handler: handlers/upload-file.lambda_handler
+    events:
+      - httpApi:
+          path: /upload
+          method: post
+          cors: true
+
+resources:
+  Resources:
+    S3Bucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${env:UPLOAD_BUCKET_NAME}
+
+
+plugins:
+  - serverless-offline
+  - serverless-python-requirements
+  - serverless-dotenv-plugin
+
+custom:
+  serverless-offline:
+    httpPort: 3003     
